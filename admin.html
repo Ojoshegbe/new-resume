@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Portfolio Admin</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 system-ui,sans-serif;background:#ECEEF3;color:#0D1B3A}
+.w{max-width:760px;margin:0 auto;padding:20px 16px 120px}
+h1{font-size:26px;margin:10px 0 4px}h2{font-size:20px;margin:36px 0 12px;border-bottom:2px solid #0D1B3A;padding-bottom:6px}
+label{display:block;font-weight:600;font-size:14px;margin:12px 0 0}
+input,textarea{display:block;width:100%;margin-top:4px;padding:10px;font:inherit;border:2px solid #0D1B3A;border-radius:6px;background:#fff}
+textarea{min-height:90px}
+button{font:600 15px system-ui;padding:10px 16px;border:2px solid #0D1B3A;border-radius:6px;background:#fff;cursor:pointer}
+button.p{background:#0D1B3A;color:#fff}button:disabled{opacity:.5}
+.item{background:#fff;border:2px solid #0D1B3A;border-radius:8px;padding:6px 16px 16px;margin:14px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:#FFD60A;border-top:2px solid #0D1B3A;padding:12px 16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap}
+#msg{font-weight:600}.err{color:#B00020}
+.hint{font-size:14px;color:#4D5873}
+img.pv{height:70px;margin-top:6px;border-radius:4px;border:1px solid #ccc}
+</style>
+</head>
+<body><div class="w" id="root"></div>
+<div class="bar" id="bar" hidden><span id="msg">Loaded</span><button class="p" id="save">Save & publish</button><a href="index.html" target="_blank">View site</a><button id="out">Log out</button></div>
+<script>
+const $=s=>document.querySelector(s);
+const h=(t,p={},...c)=>{const e=document.createElement(t);Object.assign(e,p);c.flat().forEach(x=>e.append(x));return e};
+let cfg=JSON.parse(localStorage.getItem('cms')||'{}'),D,sha;
+const say=(t,bad)=>{$('#msg').textContent=t;$('#msg').className=bad?'err':''};
+const b64=s=>btoa(unescape(encodeURIComponent(s)));
+const ub64=s=>decodeURIComponent(escape(atob(s.replace(/\n/g,''))));
+const api=(path,opt={},q='')=>fetch(`https://api.github.com/repos/${cfg.repo}/contents/${path}${q}`,{cache:'no-store',...opt,headers:{Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json'}})
+  .then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.message||r.status);return j});
+ 
+/* ---------- login ---------- */
+function login(){
+  $('#bar').hidden=true;
+  const r=h('input',{placeholder:'your-username/your-repo',value:cfg.repo||''}),
+        b=h('input',{placeholder:'main',value:cfg.branch||'main'}),
+        t=h('input',{type:'password',placeholder:'GitHub token',value:cfg.token||''}),
+        e=h('p',{className:'err'});
+  $('#root').replaceChildren(h('h1',{},'Portfolio admin'),
+    h('p',{className:'hint'},'Connect to the GitHub repository that hosts your site. Create a fine-grained token limited to that one repo with Contents: Read and write. It is stored only in this browser.'),
+    h('label',{},'Repository',r),h('label',{},'Branch',b),h('label',{},'Token',t),
+    h('div',{className:'row'},h('button',{className:'p',onclick:async()=>{
+      cfg={repo:r.value.trim(),branch:b.value.trim()||'main',token:t.value.trim()};
+      try{await load();localStorage.setItem('cms',JSON.stringify(cfg))}catch(x){e.textContent='Could not connect: '+x.message}
+    }},'Connect')),e);
+}
+ 
+async function load(){
+  const j=await api('data/content.json',{},'?ref='+cfg.branch);
+  sha=j.sha;D=JSON.parse(ub64(j.content));
+  draw();
+}
+ 
+/* ---------- field builders ---------- */
+const txt=(o,k,l,area)=>{const el=h(area?'textarea':'input',{value:o[k]||''});el.oninput=()=>o[k]=el.value;return h('label',{},l,el)};
+const lines=(o,k,l,sep,join)=>{const el=h('textarea',{value:(o[k]||[]).join(join)});el.oninput=()=>o[k]=el.value.split(sep).map(s=>s.trim()).filter(Boolean);return h('label',{},l,el)};
+ 
+const toB64=(file,img)=>new Promise((ok,no)=>{
+  if(!img){const f=new FileReader();f.onload=()=>ok(f.result.split(',')[1]);f.onerror=no;f.readAsDataURL(file);return}
+  const u=URL.createObjectURL(file),i=new Image();
+  i.onload=()=>{const s=Math.min(1,1600/i.width),c=document.createElement('canvas');c.width=i.width*s;c.height=i.height*s;c.getContext('2d').drawImage(i,0,0,c.width,c.height);ok(c.toDataURL('image/jpeg',.82).split(',')[1])};
+  i.onerror=no;i.src=u});
+ 
+const up=(o,k,l,img)=>{
+  const path=h('input',{value:o[k]||''}),pv=img?h('img',{className:'pv',src:o[k]||''}):'';
+  path.oninput=()=>{o[k]=path.value;if(img)pv.src=path.value};
+  const f=h('input',{type:'file',accept:img?'image/*':'.pdf,.png,.jpg,.jpeg,.doc,.docx'});
+  f.onchange=async()=>{
+    const file=f.files[0];if(!file)return;
+    try{
+      say('Uploading…');
+      const isImg=img&&file.type.startsWith('image/');
+      const name=(isImg?'images/up-'+Date.now()+'.jpg':'images/'+Date.now()+'-'+file.name.replace(/[^\w.-]/g,'_'));
+      await api(name,{method:'PUT',body:JSON.stringify({message:'Upload '+name,content:await toB64(file,isImg),branch:cfg.branch})});
+      o[k]=name;path.value=name;if(img)pv.src=URL.createObjectURL(file);
+      say('Uploaded. Now click Save & publish.');
+    }catch(x){say('Upload failed: '+x.message,1)}
+  };
+  return h('label',{},l,path,f,pv);
+};
+ 
+function list(key,title,fields,blank){
+  const box=h('div'),arr=D[key]=D[key]||[];
+  const paint=()=>{
+    box.replaceChildren(...arr.map((o,i)=>h('div',{className:'item'},
+      ...fields.map(([k,l,t])=>t==='img'?up(o,k,l,1):txt(o,k,l,t==='area')),
+      h('div',{className:'row'},
+        h('button',{onclick:()=>{if(i){arr.splice(i-1,0,arr.splice(i,1)[0]);paint()}}},'Move up'),
+        h('button',{onclick:()=>{if(i<arr.length-1){arr.splice(i+1,0,arr.splice(i,1)[0]);paint()}}},'Move down'),
+        h('button',{onclick:()=>{if(confirm('Delete this item?')){arr.splice(i,1);paint()}}},'Delete')))),
+      h('button',{className:'p',onclick:()=>{arr.push({...blank});paint()}},'Add '+title));
+  };
+  paint();return box;
+}
+ 
+/* ---------- editor ---------- */
+function draw(){
+  $('#bar').hidden=false;say('Loaded');
+  $('#root').replaceChildren(
+    h('h1',{},'Portfolio admin'),
+    h('p',{className:'hint'},'Edit, then click Save & publish. Your live site updates in about a minute.'),
+    h('h2',{},'Profile'),
+    txt(D,'name','Name'),txt(D,'role','Job title'),
+    txt(D,'headline','Big headline (use | to break lines)'),
+    txt(D,'lead','Intro text',1),txt(D,'available','Availability badge (empty hides it)'),
+    up(D,'photo','Portrait photo',1),up(D,'cv','Resume / CV file'),
+    h('h2',{},'Contact'),txt(D,'email','Email'),txt(D,'phone','Phone (with country code)'),txt(D,'footer','Footer text'),
+    h('h2',{},'About'),
+    lines(D,'about','About text (blank line between paragraphs)',/\n\s*\n/,'\n\n'),
+    lines(D,'skills','Skills (comma separated)',',',', '),
+    h('h2',{},'Experience & education'),
+    list('timeline','entry',[['title','Title'],['meta','Date or details']],{title:'',meta:''}),
+    h('h2',{},'Services'),
+    list('services','service',[['title','Title'],['text','Description','area']],{title:'',text:''}),
+    h('h2',{},'Projects'),
+    list('projects','project',[['title','Title'],['desc','Description','area'],['url','Live site URL'],['img','Screenshot','img']],{title:'',desc:'',url:'',img:''}));
+}
+ 
+$('#save').onclick=async()=>{
+  const b=$('#save');b.disabled=true;say('Saving…');
+  try{
+    const r=await api('data/content.json',{method:'PUT',body:JSON.stringify({message:'Update portfolio content',content:b64(JSON.stringify(D,null,2)),sha,branch:cfg.branch})});
+    sha=r.content.sha;say('Published. Live in about a minute.');
+  }catch(x){say('Save failed: '+x.message,1)}
+  b.disabled=false;
+};
+$('#out').onclick=()=>{localStorage.removeItem('cms');cfg={};login()};
+ 
+cfg.token?load().catch(login):login();
+</script>
+</body>
+</html>
